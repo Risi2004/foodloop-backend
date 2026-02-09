@@ -52,6 +52,50 @@ const uploadFiles = async (files) => {
   return uploadedFiles;
 };
 
+/**
+ * POST /api/auth/check-email
+ * Check if email already exists in DB (for real-time signup validation).
+ * Body: { email: string }
+ * Response: { exists: boolean }
+ */
+router.post('/check-email', express.json(), async (req, res) => {
+  try {
+    const email = req.body.email?.toLowerCase?.()?.trim?.();
+    if (!email) {
+      return res.status(400).json({ success: false, exists: false });
+    }
+    const existing = await User.findOne({ email });
+    return res.json({ success: true, exists: !!existing });
+  } catch (err) {
+    console.error('Check email error:', err);
+    return res.status(500).json({ success: false, exists: false });
+  }
+});
+
+/**
+ * POST /api/auth/check-contact
+ * Check if contact number already exists in DB (for real-time signup validation).
+ * Body: { contactNo: string }
+ * Response: { exists: boolean }
+ */
+router.post('/check-contact', express.json(), async (req, res) => {
+  try {
+    const raw = req.body.contactNo;
+    if (raw === undefined || raw === null) {
+      return res.status(400).json({ success: false, exists: false });
+    }
+    const contactNo = String(raw).trim().replace(/\s/g, '');
+    if (!contactNo) {
+      return res.json({ success: true, exists: false });
+    }
+    const existing = await User.findOne({ contactNo });
+    return res.json({ success: true, exists: !!existing });
+  } catch (err) {
+    console.error('Check contact error:', err);
+    return res.status(500).json({ success: false, exists: false });
+  }
+});
+
 // Signup route - apply multer middleware for file uploads
 router.post('/signup', handleFileUpload, async (req, res) => {
   try {
@@ -80,13 +124,38 @@ router.post('/signup', handleFileUpload, async (req, res) => {
       });
     }
     
-    const existingUser = await User.findOne({ email: email });
-    if (existingUser) {
-      console.log(`Email conflict: ${email} already exists for user with role: ${existingUser.role}`);
+    const existingUserByEmail = await User.findOne({ email: email });
+    if (existingUserByEmail) {
+      console.log(`Email conflict: ${email} already exists for user with role: ${existingUserByEmail.role}`);
       return res.status(409).json({
         success: false,
         message: 'Email already registered',
         errors: [{ field: 'email', message: 'This email is already registered. Please use a different email or try logging in.' }],
+      });
+    }
+
+    // Check if contact number already exists (normalize: trim and remove spaces)
+    const contactNoRaw = req.body.contactNo;
+    if (!contactNoRaw || typeof contactNoRaw !== 'string') {
+      return res.status(400).json({
+        success: false,
+        errors: [{ field: 'contactNo', message: 'Contact number is required' }],
+      });
+    }
+    const contactNo = contactNoRaw.trim().replace(/\s/g, '');
+    if (!contactNo) {
+      return res.status(400).json({
+        success: false,
+        errors: [{ field: 'contactNo', message: 'Contact number is required' }],
+      });
+    }
+    const existingUserByContact = await User.findOne({ contactNo: contactNo });
+    if (existingUserByContact) {
+      console.log(`Contact number already registered: ${contactNo}`);
+      return res.status(409).json({
+        success: false,
+        message: 'Contact number already registered',
+        errors: [{ field: 'contactNo', message: 'This contact number is already registered. Please use a different number or try logging in.' }],
       });
     }
 
@@ -118,12 +187,12 @@ router.post('/signup', handleFileUpload, async (req, res) => {
       }
     }
 
-    // Create user object based on role
+    // Create user object based on role (use normalized contactNo for consistent storage)
     const userData = {
       email: email, // Use normalized email
       password: req.body.password,
       role: role,
-      contactNo: req.body.contactNo,
+      contactNo: contactNo,
       address: req.body.address,
       ...uploadedFiles,
     };
@@ -281,7 +350,31 @@ router.post('/verify-signup-otp', express.json(), async (req, res) => {
     }
 
     const signupData = pending.signupData;
-    const user = new User(signupData);
+    // Re-check email and contactNo in case they were registered by someone else since signup
+    const existingByEmail = await User.findOne({ email: normalizedEmail });
+    if (existingByEmail) {
+      await PendingSignup.deleteOne({ email: normalizedEmail });
+      return res.status(409).json({
+        success: false,
+        message: 'Email already registered',
+        errors: [{ field: 'email', message: 'This email is already registered. Please use a different email or try logging in.' }],
+      });
+    }
+    const contactNo = (signupData.contactNo && typeof signupData.contactNo === 'string')
+      ? signupData.contactNo.trim().replace(/\s/g, '')
+      : '';
+    if (contactNo) {
+      const existingByContact = await User.findOne({ contactNo });
+      if (existingByContact) {
+        await PendingSignup.deleteOne({ email: normalizedEmail });
+        return res.status(409).json({
+          success: false,
+          message: 'Contact number already registered',
+          errors: [{ field: 'contactNo', message: 'This contact number is already registered. Please use a different number or try logging in.' }],
+        });
+      }
+    }
+    const user = new User({ ...signupData, contactNo: contactNo || signupData.contactNo });
     await user.save();
 
     await PendingSignup.deleteOne({ email: normalizedEmail });

@@ -2004,6 +2004,24 @@ router.post('/:id/accept-order', authenticateUser, async (req, res) => {
     await donation.populate('assignedReceiverId', 'receiverName receiverType email address');
     await donation.populate('assignedDriverId', 'driverName vehicleNumber vehicleType');
 
+    const donor = donation.donorId;
+    const receiver = donation.assignedReceiverId;
+    const driver = donation.assignedDriverId;
+    const {
+      sendDriverAssignedEmailToDonor,
+      sendDriverAssignedEmailToReceiver,
+    } = require('../utils/emailService');
+    if (donor && donor.email) {
+      sendDriverAssignedEmailToDonor(donation, donor, receiver, driver).catch(err => {
+        console.error('[Donations] Error sending driver-assigned email to donor:', err.message);
+      });
+    }
+    if (receiver && receiver.email) {
+      sendDriverAssignedEmailToReceiver(donation, donor, receiver, driver).catch(err => {
+        console.error('[Donations] Error sending driver-assigned email to receiver:', err.message);
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Order accepted. It now appears in your My Pickups In Transit.',

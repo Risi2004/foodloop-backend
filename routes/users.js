@@ -11,7 +11,7 @@ const Notification = require('../models/Notification');
 const { authenticateUser } = require('../middleware/auth');
 const socketService = require('../services/socketService');
 const { sendProfileUpdatedEmail } = require('../utils/emailService');
-const { handleFileUpload } = require('../middleware/upload');
+const { handleAvatarUpload } = require('../middleware/upload');
 const { uploadFileToS3 } = require('../config/awsS3');
 
 // Authentication first (no body needed - uses Bearer token)
@@ -22,13 +22,13 @@ router.use(authenticateUser);
  * Upload profile picture (any role). Must be BEFORE express.json() so multipart body is not consumed.
  * Accepts multipart with field "avatar".
  */
-router.patch('/me/avatar', handleFileUpload, async (req, res) => {
+router.patch('/me/avatar', handleAvatarUpload, async (req, res) => {
   try {
-    const file = req.files?.avatar?.[0] || req.files?.profileImage?.[0];
+    const file = req.file || req.fileAvatar || req.files?.avatar?.[0] || req.files?.profileImage?.[0];
     if (!file) {
       return res.status(400).json({
         success: false,
-        message: 'No image file provided. Use field name "avatar" or "profileImage".',
+        message: 'No image file provided. Use field name "avatar" for the profile image.',
       });
     }
     if (!file.mimetype.startsWith('image/')) {

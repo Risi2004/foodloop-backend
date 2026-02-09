@@ -34,6 +34,48 @@ const upload = multer({
 // Using .any() to accept any field name, then we'll filter in the route
 const uploadAny = upload.any();
 
+// Single file upload for profile avatar (field name "avatar" or "profileImage")
+const uploadSingleAvatar = upload.single('avatar');
+
+const runMulterAndNext = (multerMw, req, res, next, onSuccess) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Content-Type must be multipart/form-data for file upload.',
+    });
+  }
+  multerMw(req, res, (err) => {
+    if (err) {
+      console.error('Multer error:', err);
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ success: false, message: 'File too large. Maximum size is 10MB' });
+        }
+        if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+          return res.status(400).json({ success: false, message: 'Use field name "avatar" for the image.' });
+        }
+      }
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'File upload error',
+      });
+    }
+    onSuccess(req, res, next);
+  });
+};
+
+/**
+ * Handle single avatar upload. Expects multipart with field "avatar".
+ * Puts file in req.file (and also req.fileAvatar for consistency).
+ */
+const handleAvatarUpload = (req, res, next) => {
+  runMulterAndNext(uploadSingleAvatar, req, res, next, (req, res, next) => {
+    if (req.file) req.fileAvatar = req.file;
+    next();
+  });
+};
+
 // Wrap multer middleware with error handling
 const handleFileUpload = (req, res, next) => {
   // Check if this is a multipart request
@@ -106,4 +148,4 @@ const handleFileUpload = (req, res, next) => {
   });
 };
 
-module.exports = { handleFileUpload, uploadAny };
+module.exports = { handleFileUpload, handleAvatarUpload, uploadAny };

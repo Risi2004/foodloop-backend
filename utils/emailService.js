@@ -1202,6 +1202,125 @@ const sendDonationClaimedEmail = async (donation, donor, receiver) => {
 };
 
 /**
+ * Send "driver assigned" email to donor
+ * Sent when a driver accepts/claims the order (before physical pickup)
+ */
+const sendDriverAssignedEmailToDonor = async (donation, donor, receiver, driver) => {
+  if (!isEmailConfigured() || !transporter) {
+    console.warn('Email not configured. Skipping driver assigned email to donor.');
+    return;
+  }
+  if (!donor || !donor.email) return;
+  try {
+    const donorName = getUserDisplayName(donor);
+    const driverName = getUserDisplayName(driver);
+    const receiverName = receiver ? getUserDisplayName(receiver) : 'Receiver';
+    const pickupDate = new Date(donation.preferredPickupDate).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const mailOptions = {
+      from: EMAIL_FROM,
+      to: donor.email,
+      subject: '🚚 A Driver Has Been Assigned to Your Donation!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Driver Assigned</title></head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">🚚 Driver Assigned!</h1>
+          </div>
+          <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+            <p style="font-size: 16px; margin-bottom: 20px;">Hello ${donorName},</p>
+            <p style="font-size: 16px; margin-bottom: 20px;">A driver has been assigned to pick up your donation. Your food will be collected and delivered to <strong>${receiverName}</strong>.</p>
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10b981;">
+              <h2 style="color: #10b981; margin-top: 0; font-size: 20px;">Donation Details</h2>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Tracking ID:</td><td style="padding: 8px 0;">${donation.trackingId}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Item:</td><td style="padding: 8px 0;">${donation.itemName}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Pickup Date:</td><td style="padding: 8px 0;">${pickupDate}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Driver:</td><td style="padding: 8px 0;">${driverName}</td></tr>
+              </table>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${FRONTEND_URL}/donor/my-donation" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: bold;">View My Donations</a>
+            </div>
+            <p style="font-size: 14px; color: #6b7280;">Best regards,<br><strong>The FoodLoop Team</strong></p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Driver assigned email sent to donor: ${donor.email}`);
+  } catch (error) {
+    console.error(`❌ Error sending driver assigned email to donor ${donor.email}:`, error.message);
+  }
+};
+
+/**
+ * Send "driver assigned" email to receiver
+ * Sent when a driver accepts/claims the order (before physical pickup)
+ */
+const sendDriverAssignedEmailToReceiver = async (donation, donor, receiver, driver) => {
+  if (!isEmailConfigured() || !transporter) {
+    console.warn('Email not configured. Skipping driver assigned email to receiver.');
+    return;
+  }
+  if (!receiver || !receiver.email) return;
+  try {
+    const receiverName = getUserDisplayName(receiver);
+    const driverName = getUserDisplayName(driver);
+    const donorName = donor ? getUserDisplayName(donor) : 'Donor';
+    const pickupDate = new Date(donation.preferredPickupDate).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const mailOptions = {
+      from: EMAIL_FROM,
+      to: receiver.email,
+      subject: '🚚 A Driver Has Been Assigned to Your Claimed Donation!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Driver Assigned</title></head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">🚚 Driver Assigned!</h1>
+          </div>
+          <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+            <p style="font-size: 16px; margin-bottom: 20px;">Hello ${receiverName},</p>
+            <p style="font-size: 16px; margin-bottom: 20px;">A driver has been assigned to your claimed donation. They will pick up the food from <strong>${donorName}</strong> and deliver it to you.</p>
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10b981;">
+              <h2 style="color: #10b981; margin-top: 0; font-size: 20px;">Donation Details</h2>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Tracking ID:</td><td style="padding: 8px 0;">${donation.trackingId}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Item:</td><td style="padding: 8px 0;">${donation.itemName}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Quantity:</td><td style="padding: 8px 0;">${donation.quantity} ${donation.quantity === 1 ? 'serving' : 'servings'}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Pickup Date:</td><td style="padding: 8px 0;">${pickupDate}</td></tr>
+                <tr><td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Driver:</td><td style="padding: 8px 0;">${driverName}</td></tr>
+              </table>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${FRONTEND_URL}/receiver/my-claims" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: bold;">Track My Claims</a>
+            </div>
+            <p style="font-size: 14px; color: #6b7280;">Best regards,<br><strong>The FoodLoop Team</strong></p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Driver assigned email sent to receiver: ${receiver.email}`);
+  } catch (error) {
+    console.error(`❌ Error sending driver assigned email to receiver ${receiver.email}:`, error.message);
+  }
+};
+
+/**
  * Send pickup confirmed email to donor
  * Sent when a driver confirms pickup of the donation
  */
@@ -3079,6 +3198,8 @@ module.exports = {
   sendDonationClaimedEmail,
   sendDonationAvailableNotificationToDrivers,
   sendDonationAvailableNotificationToDriver,
+  sendDriverAssignedEmailToDonor,
+  sendDriverAssignedEmailToReceiver,
   sendPickupConfirmedEmailToDonor,
   sendPickupConfirmedEmailToReceiver,
   sendDeliveryConfirmedEmailToDonor,
