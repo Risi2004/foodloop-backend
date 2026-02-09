@@ -170,14 +170,21 @@ const generateImpactReceiptPDF = async (receiptData, donationData) => {
         .font('Helvetica-Bold')
         .text('Food Information', centerX + 10, row2StartY, { underline: true, width: rightMargin - centerX - 10 });
 
+      const foodTextWidth = rightMargin - centerX - 30;
+      const foodItemLineGap = 6; // Space between wrapped lines for long item names
       let foodContentY = row2StartY + sectionFontSize + headerSpacing;
+
       doc
         .fontSize(textFontSize)
         .fillColor('#000000')
-        .font('Helvetica')
-        .text(`Item: ${donationData.donation?.itemName || 'N/A'}`, centerX + 20, foodContentY, { width: rightMargin - centerX - 30 });
-      foodContentY += lineSpacing + 8;
-      doc.text(`Quantity: ${donationData.donation?.quantity || 0} ${donationData.donation?.quantity === 1 ? 'serving' : 'servings'}`, centerX + 20, foodContentY, { width: rightMargin - centerX - 30 });
+        .font('Helvetica');
+
+      const itemLabel = `Item: ${donationData.donation?.itemName || 'N/A'}`;
+      const itemHeight = doc.heightOfString(itemLabel, { width: foodTextWidth, lineGap: foodItemLineGap });
+      doc.text(itemLabel, centerX + 20, foodContentY, { width: foodTextWidth, lineGap: foodItemLineGap });
+      foodContentY += itemHeight + 10; // Use actual height + spacing before next line
+
+      doc.text(`Quantity: ${donationData.donation?.quantity || 0} ${donationData.donation?.quantity === 1 ? 'serving' : 'servings'}`, centerX + 20, foodContentY, { width: foodTextWidth });
       foodContentY += lineSpacing + 8;
       doc.text(`Category: ${donationData.donation?.foodCategory || 'N/A'}`, centerX + 20, foodContentY, { width: rightMargin - centerX - 30 });
       foodContentY += lineSpacing + 8;
@@ -222,7 +229,7 @@ const generateImpactReceiptPDF = async (receiptData, donationData) => {
         .fontSize(10)
         .fillColor('#000000')
         .font('Helvetica-Bold')
-        .text('Distance Traveled:', leftCol, metricsY)
+        .text('Distance (km):', leftCol, metricsY)
         .font('Helvetica')
         .text(`${receiptData.distanceTraveled?.toFixed(2) || '0.00'} KM`, rightCol, metricsY);
 

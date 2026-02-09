@@ -1,4 +1,5 @@
 const { transporter, isEmailConfigured, EMAIL_FROM } = require('../config/email');
+const { FRONTEND_URL } = require('../config/env');
 
 /**
  * Get user display name based on role
@@ -829,7 +830,7 @@ const sendNewDonationNotificationToReceiver = async (donation, donor, receiver) 
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/receiver/find-food" 
+              <a href="${FRONTEND_URL}/receiver/find-food" 
                  style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
                 View & Claim Donation
               </a>
@@ -999,7 +1000,7 @@ const sendDonationAvailableNotificationToDriver = async (donation, donor, receiv
             
             <p>Log in to your driver portal to view this pickup and accept the delivery.</p>
             
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/driver/delivery" class="button">
+            <a href="${FRONTEND_URL}/driver/delivery" class="button">
               View Available Pickups
             </a>
             
@@ -1165,7 +1166,7 @@ const sendDonationClaimedEmail = async (donation, donor, receiver) => {
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor/my-donation" 
+              <a href="${FRONTEND_URL}/donor/my-donation" 
                  style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
                 View My Donations
               </a>
@@ -1301,7 +1302,7 @@ const sendPickupConfirmedEmailToDonor = async (donation, donor, driver) => {
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor/my-donation" 
+              <a href="${FRONTEND_URL}/donor/my-donation" 
                  style="display: inline-block; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
                 View My Donations
               </a>
@@ -1441,7 +1442,7 @@ const sendPickupConfirmedEmailToReceiver = async (donation, receiver, driver) =>
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/receiver/my-claims" 
+              <a href="${FRONTEND_URL}/receiver/my-claims" 
                  style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 14px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
                 Track My Claims
               </a>
@@ -2171,7 +2172,7 @@ const sendReceiptEmailToDriver = async (receipt, donation, driver, pdfBuffer) =>
             <div class="metrics">
               <div class="metric">
                 <div class="metric-value">${distance} KM</div>
-                <div class="metric-label">Distance Traveled</div>
+                <div class="metric-label">Distance (km)</div>
               </div>
               <div class="metric">
                 <div class="metric-value">${peopleFed}</div>
@@ -2208,6 +2209,151 @@ const sendReceiptEmailToDriver = async (receipt, donation, driver, pdfBuffer) =>
     console.log(`✅ Receipt email sent to driver: ${driver.email}`);
   } catch (error) {
     console.error(`❌ Error sending receipt email to driver ${driver.email}:`, error.message);
+    throw error;
+  }
+};
+
+/**
+ * Send impact receipt email to receiver with PDF attachment
+ * @param {Object} receipt - Impact receipt data
+ * @param {Object} donation - Donation data
+ * @param {Object} receiver - Receiver user data
+ * @param {Buffer} pdfBuffer - PDF buffer to attach
+ */
+const sendReceiptEmailToReceiver = async (receipt, donation, receiver, pdfBuffer) => {
+  if (!isEmailConfigured() || !transporter) {
+    console.warn('Email not configured. Skipping receipt email to receiver.');
+    return;
+  }
+
+  try {
+    if (!receiver.role) {
+      receiver.role = 'Receiver';
+    }
+    const receiverName = getUserDisplayName(receiver);
+    const itemName = donation.itemName || donation.donation?.itemName || 'Food Item';
+    const peopleFed = receipt.peopleFed || 0;
+    const distance = receipt.distanceTraveled?.toFixed(2) || '0.00';
+
+    let methaneSavedValue = receipt.methaneSaved;
+    if (typeof methaneSavedValue === 'undefined' || methaneSavedValue === null) {
+      methaneSavedValue = 0;
+    }
+    const methaneSaved = typeof methaneSavedValue === 'number'
+      ? methaneSavedValue.toFixed(2)
+      : parseFloat(methaneSavedValue || 0).toFixed(2);
+
+    const mailOptions = {
+      from: EMAIL_FROM,
+      to: receiver.email,
+      subject: 'Your Impact Receipt – Thank You for Submitting!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 20px;
+            }
+            .header {
+              background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 100%);
+              color: white;
+              padding: 30px;
+              text-align: center;
+              border-radius: 10px 10px 0 0;
+            }
+            .content {
+              background: #ffffff;
+              padding: 30px;
+              border: 1px solid #e5e7eb;
+              border-top: none;
+            }
+            .impact-box {
+              background: #f0fdf4;
+              border-left: 4px solid #10b981;
+              padding: 15px;
+              margin: 20px 0;
+            }
+            .metrics {
+              display: flex;
+              justify-content: space-around;
+              margin: 20px 0;
+              flex-wrap: wrap;
+            }
+            .metric {
+              text-align: center;
+              padding: 10px;
+            }
+            .metric-value {
+              font-size: 24px;
+              font-weight: 700;
+              color: #1b4332;
+            }
+            .metric-label {
+              font-size: 12px;
+              color: #666;
+              margin-top: 5px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1 style="margin: 0;">Your Impact Receipt Is Ready</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${receiverName},</p>
+
+            <p>Thank you for submitting the impact receipt for <strong>${itemName}</strong>. Your record helps us measure the positive impact of this delivery.</p>
+
+            <div class="impact-box">
+              <strong>Impact Summary:</strong><br>
+              Your submission shows that this donation helped feed <strong>${peopleFed}</strong> ${peopleFed === 1 ? 'person' : 'people'}, with <strong>${distance} KM</strong> traveled and <strong>${methaneSaved} KG</strong> of methane emissions saved.
+            </div>
+
+            <div class="metrics">
+              <div class="metric">
+                <div class="metric-value">${peopleFed}</div>
+                <div class="metric-label">People Fed</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value">${methaneSaved} KG</div>
+                <div class="metric-label">Methane Saved</div>
+              </div>
+            </div>
+
+            <p>We've attached your impact receipt PDF for your records. Donor and driver have also received their copies.</p>
+
+            <p>Thank you for being part of the FoodLoop community and helping us track impact!</p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+            <p style="font-size: 12px; color: #9ca3af; text-align: center; margin: 0;">
+              This is an automated email. Please do not reply to this message.<br>
+              If you have any questions, contact us at <strong>foodloop.official27@gmail.com</strong>
+            </p>
+          </div>
+        </body>
+        </html>
+      `,
+      attachments: [
+        {
+          filename: `impact-receipt-${donation.trackingId || donation.donationId || 'receipt'}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Receipt email sent to receiver: ${receiver.email}`);
+  } catch (error) {
+    console.error(`❌ Error sending receipt email to receiver ${receiver.email}:`, error.message);
     throw error;
   }
 };
@@ -2377,7 +2523,7 @@ const sendReviewApprovedEmail = async (user, review) => {
             
             <p>Thank you for being part of the FoodLoop community and for sharing your experience!</p>
             
-            <p>You can view your review on our <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" style="color: #1b4332; text-decoration: none; font-weight: bold;">home page</a>.</p>
+            <p>You can view your review on our <a href="${FRONTEND_URL}" style="color: #1b4332; text-decoration: none; font-weight: bold;">home page</a>.</p>
             
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             
@@ -2705,6 +2851,58 @@ const sendPasswordResetEmail = async (email, resetLink) => {
 };
 
 /**
+ * Send signup OTP email for email verification
+ */
+const sendSignupOtpEmail = async (email, otp) => {
+  if (!isEmailConfigured() || !transporter) {
+    console.warn('Email not configured. Skipping signup OTP email.');
+    return;
+  }
+
+  try {
+    const mailOptions = {
+      from: EMAIL_FROM,
+      to: email,
+      subject: 'Your FoodLoop signup verification code',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(180deg, #1F4E36 0%, #48B47D 100%); color: white; padding: 24px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 24px; border-radius: 0 0 10px 10px; }
+            .otp { font-size: 28px; font-weight: bold; letter-spacing: 8px; color: #1F4E36; margin: 16px 0; }
+            .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2 style="margin: 0;">FoodLoop – Verify your email</h2>
+          </div>
+          <div class="content">
+            <p>Use the code below to complete your FoodLoop account signup:</p>
+            <p class="otp">${String(otp)}</p>
+            <p>This code expires in 10 minutes. If you did not request this, you can ignore this email.</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated email from FoodLoop.</p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ Signup OTP email sent to: ${email}`);
+  } catch (error) {
+    console.error(`❌ Error sending signup OTP email to ${email}:`, error.message);
+    throw error;
+  }
+};
+
+/**
  * Send confirmation email after password has been changed (post-reset)
  */
 const sendPasswordChangedEmail = async (email) => {
@@ -2889,6 +3087,7 @@ module.exports = {
   sendDonationDeletedEmail,
   sendReceiptEmailToDonor,
   sendReceiptEmailToDriver,
+  sendReceiptEmailToReceiver,
   sendReviewSubmittedEmail,
   sendReviewApprovedEmail,
   sendReviewRejectedEmail,
@@ -2897,6 +3096,7 @@ module.exports = {
   sendAdminLoginNotificationEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
+  sendSignupOtpEmail,
   sendProfileUpdatedEmail,
   sendNotificationEmail,
 };

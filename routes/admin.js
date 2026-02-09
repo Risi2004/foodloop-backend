@@ -205,12 +205,12 @@ router.patch('/users/:id/status', async (req, res) => {
 /**
  * GET /api/admin/users
  * Fetch all users with optional filters
- * Query params: status, role
+ * Query params: status, role, search (name, organization, email)
  */
 router.get('/users', async (req, res) => {
   try {
-    const { status, role } = req.query;
-    
+    const { status, role, search } = req.query;
+
     // Build query
     const query = {};
     if (status) {
@@ -218,6 +218,19 @@ router.get('/users', async (req, res) => {
     }
     if (role) {
       query.role = role;
+    }
+
+    // Search by name, organization, or email (case-insensitive)
+    if (search && typeof search === 'string' && search.trim()) {
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      query.$or = [
+        { email: regex },
+        { username: regex },
+        { businessName: regex },
+        { receiverName: regex },
+        { driverName: regex },
+      ];
     }
 
     const users = await User.find(query)
@@ -446,6 +459,18 @@ router.post('/notifications', async (req, res) => {
     });
 
     await notification.save();
+
+    // Emit real-time new_notification to target role rooms (so users see badge/list without refresh)
+    const rolesToEmit = targetRoles.includes('All')
+      ? ['Donor', 'Receiver', 'Driver']
+      : targetRoles;
+    for (const role of rolesToEmit) {
+      socketService.emitToRole(role, 'new_notification', {
+        notificationId: notification._id.toString(),
+        title: notification.title,
+        message: notification.message,
+      });
+    }
 
     // Send emails to relevant users (non-blocking)
     (async () => {

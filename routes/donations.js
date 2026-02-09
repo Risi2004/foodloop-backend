@@ -13,6 +13,7 @@ const {
   sendNewDonationNotificationToReceivers,
   sendReceiptEmailToDonor,
   sendReceiptEmailToDriver,
+  sendReceiptEmailToReceiver,
 } = require('../utils/emailService');
 const { geocodeAddress, calculateDistance } = require('../services/geocodingService');
 const ImpactReceipt = require('../models/ImpactReceipt');
@@ -1114,19 +1115,16 @@ router.get('/driver-statistics', authenticateUser, async (req, res) => {
       return updatedDate >= startOfLastMonth && updatedDate < endOfLastMonth;
     });
 
-    // Import distance and geocoding services
-    const { calculateDistance, formatDistance } = require('../utils/distanceService');
+    // Import distance (route along roads, fallback to straight-line) and geocoding
+    const { calculateDistance, formatDistance, getRouteDistanceKm } = require('../utils/distanceService');
     const { geocodeAddress } = require('../services/geocodingService');
 
-    // Calculate total distance travelled
-    let totalDistance = 0;
-    for (const donation of allDelivered) {
+    // Helper: get donor and receiver coords for a donation, then return route distance (km) or straight-line fallback
+    const getDeliveryDistanceKm = async (donation) => {
       let donorLat = donation.donorLatitude;
       let donorLng = donation.donorLongitude;
       let receiverLat = null;
       let receiverLng = null;
-
-      // Get donor coordinates
       if (!donorLat || !donorLng) {
         if (donation.donorAddress || donation.donorId?.address) {
           const coords = await geocodeAddress(donation.donorAddress || donation.donorId?.address);
@@ -1136,8 +1134,6 @@ router.get('/driver-statistics', authenticateUser, async (req, res) => {
           }
         }
       }
-
-      // Get receiver coordinates
       if (donation.assignedReceiverId?.address) {
         const coords = await geocodeAddress(donation.assignedReceiverId.address);
         if (coords) {
@@ -1145,77 +1141,26 @@ router.get('/driver-statistics', authenticateUser, async (req, res) => {
           receiverLng = coords.lng;
         }
       }
+      if (!donorLat || !donorLng || !receiverLat || !receiverLng) return 0;
+      const routeKm = await getRouteDistanceKm(donorLat, donorLng, receiverLat, receiverLng);
+      return routeKm != null ? routeKm : calculateDistance(donorLat, donorLng, receiverLat, receiverLng);
+    };
 
-      // Calculate distance if both coordinates available
-      if (donorLat && donorLng && receiverLat && receiverLng) {
-        const distance = calculateDistance(donorLat, donorLng, receiverLat, receiverLng);
-        totalDistance += distance;
-      }
-    }
+    // Total distance: route distance (same as map) per delivery, fallback to straight-line
+    const totalDistance = await allDelivered.reduce(async (sumP, d) => {
+      const sum = await sumP;
+      return sum + await getDeliveryDistanceKm(d);
+    }, Promise.resolve(0));
 
-    // Calculate current month distance
-    let currentMonthDistance = 0;
-    for (const donation of currentMonthDelivered) {
-      let donorLat = donation.donorLatitude;
-      let donorLng = donation.donorLongitude;
-      let receiverLat = null;
-      let receiverLng = null;
+    const currentMonthDistance = await currentMonthDelivered.reduce(async (sumP, d) => {
+      const sum = await sumP;
+      return sum + await getDeliveryDistanceKm(d);
+    }, Promise.resolve(0));
 
-      if (!donorLat || !donorLng) {
-        if (donation.donorAddress || donation.donorId?.address) {
-          const coords = await geocodeAddress(donation.donorAddress || donation.donorId?.address);
-          if (coords) {
-            donorLat = coords.lat;
-            donorLng = coords.lng;
-          }
-        }
-      }
-
-      if (donation.assignedReceiverId?.address) {
-        const coords = await geocodeAddress(donation.assignedReceiverId.address);
-        if (coords) {
-          receiverLat = coords.lat;
-          receiverLng = coords.lng;
-        }
-      }
-
-      if (donorLat && donorLng && receiverLat && receiverLng) {
-        const distance = calculateDistance(donorLat, donorLng, receiverLat, receiverLng);
-        currentMonthDistance += distance;
-      }
-    }
-
-    // Calculate last month distance
-    let lastMonthDistance = 0;
-    for (const donation of lastMonthDelivered) {
-      let donorLat = donation.donorLatitude;
-      let donorLng = donation.donorLongitude;
-      let receiverLat = null;
-      let receiverLng = null;
-
-      if (!donorLat || !donorLng) {
-        if (donation.donorAddress || donation.donorId?.address) {
-          const coords = await geocodeAddress(donation.donorAddress || donation.donorId?.address);
-          if (coords) {
-            donorLat = coords.lat;
-            donorLng = coords.lng;
-          }
-        }
-      }
-
-      if (donation.assignedReceiverId?.address) {
-        const coords = await geocodeAddress(donation.assignedReceiverId.address);
-        if (coords) {
-          receiverLat = coords.lat;
-          receiverLng = coords.lng;
-        }
-      }
-
-      if (donorLat && donorLng && receiverLat && receiverLng) {
-        const distance = calculateDistance(donorLat, donorLng, receiverLat, receiverLng);
-        lastMonthDistance += distance;
-      }
-    }
+    const lastMonthDistance = await lastMonthDelivered.reduce(async (sumP, d) => {
+      const sum = await sumP;
+      return sum + await getDeliveryDistanceKm(d);
+    }, Promise.resolve(0));
 
     // Calculate trends
     const deliveriesTrend = lastMonthDelivered.length > 0
@@ -2403,6 +2348,13 @@ router.post('/:id/confirm-delivery', authenticateUser, async (req, res) => {
       status: donation.status,
     });
 
+    // Notify donor and receiver so My Donation and My Claims refetch in real time
+    const donorIdStr = donation.donorId?.toString?.() || donation.donorId?.toString();
+    const receiverIdStr = donation.assignedReceiverId?.toString?.();
+    const donationIdStr = donation._id.toString();
+    if (donorIdStr) socketService.emitToUser(donorIdStr, 'delivery_confirmed', { donationId: donationIdStr });
+    if (receiverIdStr) socketService.emitToUser(receiverIdStr, 'delivery_confirmed', { donationId: donationIdStr });
+
     // Fetch donor, receiver, and driver details for emails
     const donor = await User.findById(donation.donorId).select('-password');
     const receiver = await User.findById(donation.assignedReceiverId).select('-password');
@@ -2697,17 +2649,26 @@ router.post('/:id/create-receipt', authenticateUser, async (req, res) => {
       });
     }
 
-    // Calculate distance if coordinates are available
+    // Calculate distance (route along roads, same as map; fallback to straight-line)
     let distanceTraveled = 0;
     if (donation.donorLatitude && donation.donorLongitude && donation.assignedReceiverId?.address) {
+      const { getRouteDistanceKm, calculateDistance: calcDist } = require('../utils/distanceService');
       const receiverCoords = await geocodeAddress(donation.assignedReceiverId.address);
       if (receiverCoords) {
-        distanceTraveled = calculateDistance(
+        const routeKm = await getRouteDistanceKm(
           donation.donorLatitude,
           donation.donorLongitude,
           receiverCoords.lat,
           receiverCoords.lng
         );
+        distanceTraveled = routeKm != null
+          ? routeKm
+          : calcDist(
+              donation.donorLatitude,
+              donation.donorLongitude,
+              receiverCoords.lat,
+              receiverCoords.lng
+            );
       }
     }
 
@@ -2848,6 +2809,25 @@ router.post('/:id/create-receipt', authenticateUser, async (req, res) => {
             console.log(`[Donations] Receipt email sent to driver: ${fullDonation.assignedDriverId.email}`);
           } catch (emailError) {
             console.error(`[Donations] Error sending receipt email to driver:`, emailError.message);
+            // Don't fail receipt creation if email fails
+          }
+        }
+
+        if (fullDonation.assignedReceiverId && fullDonation.assignedReceiverId.email) {
+          try {
+            await sendReceiptEmailToReceiver(
+              savedReceipt,
+              {
+                ...donationDataForPDF,
+                itemName: fullDonation.itemName,
+                receiver: donationDataForPDF.receiver,
+              },
+              fullDonation.assignedReceiverId,
+              pdfBuffer
+            );
+            console.log(`[Donations] Receipt email sent to receiver: ${fullDonation.assignedReceiverId.email}`);
+          } catch (emailError) {
+            console.error(`[Donations] Error sending receipt email to receiver:`, emailError.message);
             // Don't fail receipt creation if email fails
           }
         }

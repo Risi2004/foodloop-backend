@@ -12,7 +12,9 @@ const {
   sendAdminLoginNotificationEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
+  sendSignupOtpEmail,
 } = require('../utils/emailService');
+const PendingSignup = require('../models/PendingSignup');
 const {
   donorIndividualValidation,
   donorBusinessValidation,
@@ -21,6 +23,7 @@ const {
   handleValidationErrors,
 } = require('../middleware/validation');
 const { authenticateUser } = require('../middleware/auth');
+const { FRONTEND_URL } = require('../config/env');
 
 // Helper function to upload files to S3
 const uploadFiles = async (files) => {
@@ -159,32 +162,32 @@ router.post('/signup', handleFileUpload, async (req, res) => {
       // Don't set username for Drivers
     }
 
-    // Create user
-    const user = new User(userData);
-    await user.save();
+    // OTP verification: store pending signup and send OTP (do not create User yet)
+    const otp = crypto.randomInt(100000, 1000000);
+    const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const signupData = JSON.parse(JSON.stringify(userData));
 
-    // Send appropriate email based on role and status
+    await PendingSignup.findOneAndUpdate(
+      { email },
+      { otpHash, otpExpiresAt, signupData, createdAt: new Date() },
+      { upsert: true, new: true }
+    );
+
     try {
-      if (role === 'Donor' && donorType === 'Individual') {
-        // Individual Donor - account is immediately active
-        await sendWelcomeEmail(user);
-      } else {
-        // Business Donor, Receiver, or Driver - needs admin approval
-        await sendPendingApprovalEmail(user);
-      }
+      await sendSignupOtpEmail(email, otp);
     } catch (emailError) {
-      // Log email error but don't fail signup
-      console.error('Email sending error (signup):', emailError.message);
+      console.error('OTP email error:', emailError.message);
+      return res.status(500).json({
+        success: false,
+        errors: [{ field: 'submit', message: 'Failed to send verification email. Please try again.' }],
+      });
     }
-
-    // Return success (don't return password)
-    const userResponse = user.toObject();
-    delete userResponse.password;
 
     res.status(201).json({
       success: true,
-      message: 'Account created successfully',
-      user: userResponse,
+      message: 'OTP sent to your email',
+      email,
     });
   } catch (error) {
     console.error('Signup error:', error);
@@ -229,6 +232,179 @@ router.post('/signup', handleFileUpload, async (req, res) => {
       message: 'Internal server error',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  }
+});
+
+/**
+ * POST /api/auth/verify-signup-otp
+ * Verify OTP and create user from pending signup data
+ */
+router.post('/verify-signup-otp', express.json(), async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required',
+      });
+    }
+    if (otp === undefined || otp === null || (typeof otp !== 'string' && typeof otp !== 'number')) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP is required',
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const pending = await PendingSignup.findOne({ email: normalizedEmail });
+    if (!pending) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP. Please request a new verification code.',
+      });
+    }
+    if (new Date() > pending.otpExpiresAt) {
+      await PendingSignup.deleteOne({ email: normalizedEmail });
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired. Please request a new verification code.',
+      });
+    }
+
+    const otpHash = crypto.createHash('sha256').update(String(otp).trim()).digest('hex');
+    if (otpHash !== pending.otpHash) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP. Please check the code and try again.',
+      });
+    }
+
+    const signupData = pending.signupData;
+    const user = new User(signupData);
+    await user.save();
+
+    await PendingSignup.deleteOne({ email: normalizedEmail });
+
+    const role = signupData.role;
+    const donorType = signupData.donorType;
+    try {
+      if (role === 'Donor' && donorType === 'Individual') {
+        await sendWelcomeEmail(user);
+      } else {
+        await sendPendingApprovalEmail(user);
+      }
+    } catch (emailError) {
+      console.error('Email sending error (verify-signup-otp):', emailError.message);
+    }
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(200).json({
+      success: true,
+      message: 'Account created successfully',
+      user: userResponse,
+    });
+  } catch (error) {
+    console.error('Verify signup OTP error:', error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      const message = field === 'email' ? 'This email is already registered. Please sign in or use a different email.' : `${field} already exists`;
+      return res.status(409).json({
+        success: false,
+        message,
+      });
+    }
+    if (error.name === 'ValidationError') {
+      const errors = Object.keys(error.errors).map(key => ({
+        field: key,
+        message: error.errors[key].message,
+      }));
+      return res.status(400).json({
+        success: false,
+        errors,
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+});
+
+/**
+ * POST /api/auth/resend-signup-otp
+ * Resend OTP for pending signup (rate-limit: 1 per minute per email)
+ */
+const resendOtpCooldown = new Map(); // email -> lastSentAt
+const RESEND_COOLDOWN_MS = 60 * 1000; // 1 minute
+
+router.post('/resend-signup-otp', express.json(), async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required',
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const now = Date.now();
+    const lastSent = resendOtpCooldown.get(normalizedEmail);
+    if (lastSent && now - lastSent < RESEND_COOLDOWN_MS) {
+      return res.status(429).json({
+        success: false,
+        message: 'Please wait a minute before requesting another code.',
+      });
+    }
+
+    const pending = await PendingSignup.findOne({ email: normalizedEmail });
+    if (!pending) {
+      return res.status(400).json({
+        success: false,
+        message: 'No pending signup found for this email. Please start signup again.',
+      });
+    }
+    if (new Date() > pending.otpExpiresAt) {
+      await PendingSignup.deleteOne({ email: normalizedEmail });
+      return res.status(400).json({
+        success: false,
+        message: 'Verification code has expired. Please start signup again.',
+      });
+    }
+
+    const otp = crypto.randomInt(100000, 1000000);
+    const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    pending.otpHash = otpHash;
+    pending.otpExpiresAt = otpExpiresAt;
+    await pending.save();
+
+    try {
+      await sendSignupOtpEmail(normalizedEmail, otp);
+    } catch (emailError) {
+      console.error('Resend OTP email error:', emailError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send verification email. Please try again.',
+      });
+    }
+
+    resendOtpCooldown.set(normalizedEmail, now);
+
+    res.status(200).json({
+      success: true,
+      message: 'A new verification code has been sent to your email.',
+    });
+  } catch (error) {
+    console.error('Resend signup OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 });
@@ -438,8 +614,7 @@ router.post('/forgot-password', express.json(), async (req, res) => {
       user.resetTokenExpires = new Date(Date.now() + 3600000); // 1 hour
       await user.save();
 
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const resetLink = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+      const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`;
 
       (async () => {
         try {

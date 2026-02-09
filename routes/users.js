@@ -404,8 +404,9 @@ router.patch('/me', async (req, res) => {
       const prevContactNo = user.contactNo;
       const prevAddress = user.address;
       const prevEmail = user.email;
+      const prevAboutUs = user.aboutUs;
 
-      const { receiverName, receiverType, email, contactNo, address } = req.body;
+      const { receiverName, receiverType, email, contactNo, address, aboutUs } = req.body;
 
       if (receiverName !== undefined) {
         user.receiverName = typeof receiverName === 'string' ? receiverName.trim() || null : user.receiverName;
@@ -421,6 +422,9 @@ router.patch('/me', async (req, res) => {
       if (address !== undefined) {
         const val = typeof address === 'string' ? address.trim() : '';
         if (val) user.address = val;
+      }
+      if (aboutUs !== undefined) {
+        user.aboutUs = typeof aboutUs === 'string' ? aboutUs.trim() || null : user.aboutUs;
       }
       if (email !== undefined) {
         const newEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
@@ -444,6 +448,7 @@ router.patch('/me', async (req, res) => {
       if (prevReceiverType !== user.receiverType) changedFields.push('Organization Type');
       if (prevContactNo !== user.contactNo) changedFields.push('Contact Number');
       if (prevAddress !== user.address) changedFields.push('Address');
+      if (prevAboutUs !== user.aboutUs) changedFields.push('About Us');
       if (prevEmail !== user.email) changedFields.push('Email');
     }
 

@@ -77,6 +77,10 @@ const userSchema = new mongoose.Schema({
     enum: ['NGO', 'Food Banks', 'Service Organization'],
     default: null,
   },
+  aboutUs: {
+    type: String,
+    default: null,
+  },
 
   // Driver-specific fields
   driverName: {

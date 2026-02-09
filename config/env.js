@@ -92,4 +92,7 @@ module.exports = {
   // AI Service Configuration
   AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8000',
   AI_SERVICE_TIMEOUT: parseInt(process.env.AI_SERVICE_TIMEOUT) || 60000, // 60 seconds (increased for Gemini API)
+
+  // Frontend URL (for email links; default to deployed app)
+  FRONTEND_URL: (process.env.FRONTEND_URL || 'https://foodloop-hypernova.vercel.app').replace(/\/$/, ''),
 };
