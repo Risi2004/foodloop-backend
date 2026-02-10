@@ -2730,6 +2730,12 @@ router.post('/:id/create-receipt', authenticateUser, async (req, res) => {
       quantity: donation.quantity,
     });
 
+    // Notify donor so their digital receipt / impact section can refresh in real time
+    const donorIdStr = donation.donorId?.toString?.() || donation.donorId?.toString();
+    if (donorIdStr) {
+      socketService.emitToUser(donorIdStr, 'impact_receipt_updated', { donationId: id.toString() });
+    }
+
     // Generate PDF and send emails asynchronously (don't block response)
     (async () => {
       try {
