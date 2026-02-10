@@ -16,6 +16,7 @@ const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const contactRoutes = require('./routes/contact');
 const donationRoutes = require('./routes/donations');
+const donationChatRoutes = require('./routes/donationChat');
 const userRoutes = require('./routes/users');
 const reviewRoutes = require('./routes/reviews');
 const notificationRoutes = require('./routes/notifications');
@@ -55,6 +56,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/contact', contactRoutes);
 
 // Donation routes (for image upload and AI analysis)
+app.use('/api/donations', donationChatRoutes);
 app.use('/api/donations', donationRoutes);
 
 // User routes (for user profile updates)

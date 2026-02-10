@@ -44,6 +44,17 @@ function emitToRole(role, event, data = {}) {
 }
 
 /**
+ * Emit an event to all sockets in a donation room (donor, receiver, driver tracking this donation).
+ * @param {string} donationId - Donation ID (MongoDB ObjectId string)
+ * @param {string} event - Event name (e.g. donation_chat_message)
+ * @param {object} data - Payload to send
+ */
+function emitToDonationRoom(donationId, event, data = {}) {
+  if (!io || !donationId) return;
+  io.to(`donation:${donationId}`).emit(event, data);
+}
+
+/**
  * Emit driver location to all donor/receiver clients tracking donations for this driver.
  * Call after updating User.driverLatitude/driverLongitude (PATCH /me/location or demo tick).
  * @param {string} driverId - MongoDB ObjectId of the driver user
@@ -79,5 +90,6 @@ module.exports = {
   setIO,
   emitToUser,
   emitToRole,
+  emitToDonationRoom,
   emitDriverLocation,
 };
