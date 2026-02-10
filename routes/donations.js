@@ -459,7 +459,18 @@ router.post('/', authenticateUser, async (req, res) => {
       status: 'pending',
     });
 
-    await donation.save();
+    try {
+      await donation.save();
+    } catch (saveError) {
+      if (saveError.code === 11000 && saveError.message?.includes('trackingId')) {
+        console.warn('[Donations] Duplicate trackingId on create (race condition fallback):', saveError.message);
+        return res.status(503).json({
+          success: false,
+          message: 'Please try again. A temporary conflict occurred while creating your donation.',
+        });
+      }
+      throw saveError;
+    }
 
     console.log('[Donations] Donation created successfully:', {
       donationId: donation._id,

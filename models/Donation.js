@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { getNextSequenceForDate } = require('./DonationTrackingSequence');
 
 const donationSchema = new mongoose.Schema({
   // Donor information
@@ -162,27 +163,18 @@ const donationSchema = new mongoose.Schema({
   },
 });
 
-// Generate tracking ID before saving
+// Generate tracking ID before saving (atomic sequence to avoid duplicate key under concurrency)
 donationSchema.pre('save', async function() {
   if (this.isNew && !this.trackingId) {
-    // Generate tracking ID: FL-YYYYMMDD-XXXX
     const date = new Date();
-    const dateStr = date.getFullYear().toString() + 
-                   (date.getMonth() + 1).toString().padStart(2, '0') + 
-                   date.getDate().toString().padStart(2, '0');
-    
-    // Get count of donations today for unique ID
-    const count = await mongoose.model('Donation').countDocuments({
-      createdAt: {
-        $gte: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
-        $lt: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1),
-      }
-    });
-    
-    const sequence = (count + 1).toString().padStart(2, '0');
-    this.trackingId = `FL-${dateStr}-${sequence}`;
+    const dateStr = date.getFullYear().toString() +
+      (date.getMonth() + 1).toString().padStart(2, '0') +
+      date.getDate().toString().padStart(2, '0');
+
+    const sequence = await getNextSequenceForDate(dateStr);
+    this.trackingId = `FL-${dateStr}-${sequence.toString().padStart(2, '0')}`;
   }
-  
+
   this.updatedAt = Date.now();
 });
 
